@@ -22,7 +22,7 @@ body: |
   combine two filters, like addition, generally feed the same input to
   both and combine the results. So, you can implement an averaging
   filter as `add / length` - feeding the input array both to the `add`
-  filter and the `length` filter and dividing the results.
+  filter and the `length` filter and then performing the division.
 
   But that's getting ahead of ourselves. :) Let's start with something
   simpler:
@@ -40,14 +40,16 @@ manpage_intro: |
   running the command `jq 'map(.price) | add'` will take an array of
   JSON objects as input and return the sum of their "price" fields.
 
-  By default, `jq` reads a stream of JSON objects (whitespace
-  separated) from `stdin`. One or more <files> may be specified, in
+  `jq` can accept text input as well, but by default, `jq` reads a
+  stream of JSON entities (including numbers and other literals) from
+  `stdin`. Whitespace is only needed to separate entities such as 1
+  and 2, and true and false.  One or more <files> may be specified, in
   which case `jq` will read input from those instead.
 
-  The <options> are described in the [INVOKING JQ] section, they
+  The <options> are described in the [INVOKING JQ] section; they
   mostly concern input and output formatting. The <filter> is written
   in the jq language and specifies how to transform the input
-  document.
+  file or document.
 
   ## FILTERS
 
@@ -708,6 +710,9 @@ sections:
           - program: 'map(select(. >= 2))'
             input: '[1,5,3,0,7]'
             output: ['[5,3,7]']
+          - program: '.[] | select(.id == "second")'
+            input: '[{"id": "first", "val": 1}, {"id": "second", "val": 2}]'
+            output: '{"id": "second", "val": 2}'
 
 
       - title: "`arrays`, `objects`, `iterables`, `booleans`, `numbers`, `strings`, `nulls`, `values`, `scalars`"
@@ -1240,9 +1245,10 @@ sections:
           The `while(cond; update)` function allows you to repeatedly
           apply an update to `.` until `cond` is false.
 
-          Note that `while(cond; update)` is internally defined as a jq
-          function written in jq, using only functional constructs.  See
-          advanced topics below.
+          Note that `while(cond; update)` is internally defined as a
+          recursive jq function.  Recursive calls within `while` will
+          not consume additional memory if `update` produces at most one
+          output for each input.  See advanced topics below.
 
         examples:
           - program: '[while(.<100; .*2)]'
@@ -1250,7 +1256,7 @@ sections:
             output: ['[1,2,4,8,16,32,64]']
 
 
-      - title: "`recurse(f)`, `recurse`, `recurse_down`"
+      - title: "`recurse(f)`, `recurse`, `recurse(f; condition)`, `recurse_down`"
         body: |
 
           The `recurse(f)` function allows you to search through a
@@ -1275,9 +1281,22 @@ sections:
           When called without an argument, `recurse` is equivalent to
           `recurse(.[]?)`.
 
+          `recurse(f)` is identical to `recurse(f; . != null)` and can be
+          used without concerns about recursion depth.
+
+          `recurse(f; condition)` is a generator which begins by
+          emitting . and then emits in turn .|f, .|f|f, .|f|f|f, ...  so long
+          as the computed value satisfies the condition. For example,
+          to generate all the integers, at least in principle, one
+          could write `recurse(.+1; true)`.
+
           For legacy reasons, `recurse_down` exists as an alias to
           calling `recurse` without arguments. This alias is considered
           *deprecated* and will be removed in the next major release.
+
+          The recursive calls in `recurse` will not consume additional
+          memory whenever `f` produces at most a single output for each
+          input.
 
         examples:
           - program: 'recurse(.foo[])'
@@ -1287,12 +1306,20 @@ sections:
               - '{"foo":[]}'
               - '{"foo":[{"foo":[]}]}'
               - '{"foo":[]}'
+
           - program: 'recurse'
             input: '{"a":0,"b":[1]}'
             output:
               - '0'
               - '[1]'
               - '1'
+
+          - program: 'recurse(. * .; . < 20)'
+            input: 2
+            output:
+                - 2
+                - 4
+                - 16
 
       - title: "`..`"
         body: |
@@ -1690,7 +1717,7 @@ sections:
              of each capture as the key, and the matched string as the
              corresponding value.
   
-            example:
+            examples:
             - program: 'capture("(?<a>[a-z]+)-(?<n>[0-9]+)")'
               input: '"xyzzy-14"'
               output: '{ "a": "xyzzy", "n": "14" }''
@@ -1940,7 +1967,21 @@ sections:
         body: |
 
           As described above, `recurse` uses recursion, and any jq
-          function can be recursive.  Tail calls are optmized.
+          function can be recursive.  The `while` builtin is also
+          implemented in terms of recursion.
+
+          Tail calls are optmized whenever the expression to the left of
+          the recursive call outputs its last value.  In practice this
+          means that the expression to the left of the recursive call
+          should not produce more than one output for each input.
+
+          For example:
+
+              def recurse(f): def r: ., (f | select(. != null) | r); r;
+
+              def while(cond; update):
+                def w: if cond then ., (update | _while) else empty end;
+                try _while catch if . == "break" then empty else . end;
 
       - title: Generators and iterators
         body: |

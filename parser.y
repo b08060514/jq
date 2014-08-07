@@ -118,7 +118,15 @@ struct lexer_param {
 void yyerror(YYLTYPE* loc, block* answer, int* errors, 
              struct locfile* locations, struct lexer_param* lexer_param_ptr, const char *s){
   (*errors)++;
-  locfile_locate(locations, *loc, "error: %s", s);
+  if (strstr(s, "unexpected")) {
+#ifdef WIN32
+      locfile_locate(locations, *loc, "error: %s (Windows cmd shell quoting issues?)", s);
+#else
+      locfile_locate(locations, *loc, "error: %s (Unix shell quoting issues?)", s);
+#endif
+  } else {
+      locfile_locate(locations, *loc, "error: %s", s);
+  }
 }
 
 int yylex(YYSTYPE* yylval, YYLTYPE* yylloc, block* answer, int* errors, 
@@ -278,10 +286,7 @@ FuncDef FuncDefs {
 
 Exp:
 FuncDef Exp %prec ';' {
-  if (block_is_funcdef($2))
-    $$ = block_bind($1, $2, OP_IS_CALL_PSEUDO);
-  else
-    $$ = block_bind($1, BLOCK(gen_op_simple(TOP), $2), OP_IS_CALL_PSEUDO);
+  $$ = block_bind_referenced($1, $2, OP_IS_CALL_PSEUDO);
 } |
 
 Term "as" '$' IDENT '|' Exp {
